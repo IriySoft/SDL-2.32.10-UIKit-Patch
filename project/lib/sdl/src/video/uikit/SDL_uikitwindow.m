@@ -213,12 +213,12 @@ int UIKit_CreateWindow(_THIS, SDL_Window *window)
             }
             if (scene) {
                 //NSLog(@"SDL window scene found!");
-                uiwindow = [[UIWindow alloc] initWithWindowScene:scene];
+                uiwindow = [[SDL_uikitwindow alloc] initWithWindowScene:scene];
             }
         }
         if (!uiwindow) {
             // ignore the size user requested, and make a fullscreen window
-            uiwindow = [[UIWindow alloc] initWithFrame:data.uiscreen.bounds];
+            uiwindow = [[SDL_uikitwindow alloc] initWithFrame:data.uiscreen.bounds];
         }
 
         /* put the window on an external display if appropriate. */
@@ -493,7 +493,7 @@ NSUInteger UIKit_GetSupportedOrientations(SDL_Window * window)
 }
 #endif /* !TARGET_OS_TV */
 
-int SDL_iPhoneSetAnimationCallback(SDL_Window * window, int interval, void (*callback)(void*), void *callbackParam)
+int SDL_iPhoneSetAnimationCallback(SDL_Window * window, int interval, SDL_iOSAnimationCallback callback, void *callbackParam)
 {
     if (!window || !window->driverdata) {
         return SDL_SetError("Invalid window");

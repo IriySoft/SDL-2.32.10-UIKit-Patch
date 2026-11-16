@@ -39,6 +39,10 @@ extern API_AVAILABLE(ios(13.0)) UIWindowScene *UIKit_GetActiveWindowScene(void);
 extern void UIKit_SetGameControllerInteraction(bool enabled);
 extern void UIKit_SetViewGameControllerInteraction(UIView *view, bool enabled);
 
+#if !defined(SDL_PLATFORM_TVOS) && !defined(SDL_PLATFORM_VISIONOS)
+extern UIInterfaceOrientation UIKit_GetInterfaceOrientation(void);
+#endif
+
 #endif /* __OBJC__ */
 
 void UIKit_SuspendScreenSaver(_THIS);

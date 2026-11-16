@@ -27,6 +27,8 @@
 #include "SDL_system.h"
 #include "SDL_main.h"
 
+#include "SDL_uikitevents.h"
+
 #import "SDL_uikitappdelegate.h"
 #import "SDL_uikitmodes.h"
 #import "SDL_uikitwindow.h"
@@ -53,28 +55,43 @@ static int exit_status;
 int SDL_UIKitRunApp(int argc, char *argv[], SDL_main_func mainFunction)
 {
     int i;
+    
+    //NSLog(@"SDL new hello 4");
 
     /* store arguments */
     forward_main = mainFunction;
     forward_argc = argc;
+    forward_argv = argv;
+    /*
     forward_argv = (char **)malloc((argc+1) * sizeof(char *));
     for (i = 0; i < argc; i++) {
         forward_argv[i] = malloc( (strlen(argv[i])+1) * sizeof(char));
         strcpy(forward_argv[i], argv[i]);
     }
     forward_argv[i] = NULL;
-
+    */
     /* Give over control to run loop, SDLUIKitDelegate will handle most things from here */
     @autoreleasepool {
-        UIApplicationMain(argc, argv, nil, [SDLUIKitDelegate getAppDelegateClassName]);
+        NSString *name = nil;
+
+        if (@available(iOS 13.0, *)) {
+            //NSLog(@"SDL Scene!");
+            name = [SDLUIKitSceneDelegate getSceneDelegateClassName];
+        }
+        if (!name) {
+            name = [SDLUIKitDelegate getAppDelegateClassName];
+        }
+        //name = [SDLUIKitDelegate getAppDelegateClassName];
+        UIApplicationMain(argc, argv, nil, name);
     }
 
     /* free the memory we used to hold copies of argc and argv */
+    /*
     for (i = 0; i < forward_argc; i++) {
         free(forward_argv[i]);
     }
     free(forward_argv);
-
+    */
     return exit_status;
 }
 
@@ -116,7 +133,7 @@ static UIImage *SDL_LoadLaunchImageNamed(NSString *name, int screenh)
             }
         }
     }
-
+    //NSLog(@"SDL launch image @i",(image != nil));
     if (!image) {
         image = [UIImage imageNamed:name];
     }
@@ -349,6 +366,176 @@ static UIImage *SDL_LoadLaunchImageNamed(NSString *name, int screenh)
 
 @end
 
+API_AVAILABLE(ios(13.0))
+@implementation SDLUIKitSceneDelegate
+{
+    UIWindow *launchWindow;
+}
+
++ (NSString *)getSceneDelegateClassName
+{
+    return @"SDLUIKitSceneDelegate";
+}
+
+- (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)connectionOptions
+{
+    if (![scene isKindOfClass:[UIWindowScene class]]) {
+        return;
+    }
+
+    UIWindowScene *windowScene = (UIWindowScene *)scene;
+    windowScene.delegate = self;
+
+    NSBundle *bundle = [NSBundle mainBundle];
+
+#ifdef SDL_IPHONE_LAUNCHSCREEN
+    UIViewController *vc = nil;
+    NSString *screenname = nil;
+
+#if !defined(SDL_PLATFORM_TVOS) && !defined(SDL_PLATFORM_VISIONOS)
+    screenname = [bundle objectForInfoDictionaryKey:@"UILaunchStoryboardName"];
+
+    if (screenname) {
+        @try {
+            UIStoryboard *storyboard = [UIStoryboard storyboardWithName:screenname bundle:bundle];
+            __auto_type storyboardVc = [storyboard instantiateInitialViewController];
+            vc = [[SDLLaunchStoryboardViewController alloc] initWithStoryboardViewController:storyboardVc];
+        }
+        @catch (NSException *exception) {
+            // Do nothing (there's more code to execute below).
+        }
+    }
+#endif
+
+    if (vc == nil) {
+        vc = [[SDLLaunchScreenController alloc] initWithNibName:screenname bundle:bundle];
+    }
+
+    if (vc.view) {
+#ifdef SDL_PLATFORM_VISIONOS
+        CGRect viewFrame = CGRectMake(0, 0, SDL_XR_SCREENWIDTH, SDL_XR_SCREENHEIGHT);
+#else
+        CGRect viewFrame = windowScene.coordinateSpace.bounds;
+#endif
+        launchWindow = [[UIWindow alloc] initWithWindowScene:windowScene];
+        launchWindow.frame = viewFrame;
+
+        launchWindow.windowLevel = UIWindowLevelNormal + 1.0;
+        launchWindow.hidden = NO;
+        launchWindow.rootViewController = vc;
+        //NSLog(@"SDL launch window ok");
+    }
+#endif
+
+    // Set working directory to resource path
+    [[NSFileManager defaultManager] changeCurrentDirectoryPath:[bundle resourcePath]];
+
+    // Handle any connection options (like opening URLs)
+    for (NSUserActivity *activity in connectionOptions.userActivities) {
+        if (activity.webpageURL) {
+            [self handleURL:activity.webpageURL];
+        }
+    }
+
+    for (UIOpenURLContext *urlContext in connectionOptions.URLContexts) {
+        [self handleURL:urlContext.URL];
+    }
+
+    SDL_SetMainReady();
+    [self performSelector:@selector(postFinishLaunch) withObject:nil afterDelay:0.0];
+}
+
+- (void)scene:(UIScene *)scene openURLContexts:(NSSet<UIOpenURLContext *> *)URLContexts
+{
+    for (UIOpenURLContext *context in URLContexts) {
+        [self handleURL:context.URL];
+    }
+}
+
+- (void)sceneDidBecomeActive:(UIScene *)scene
+{
+    SDL_OnApplicationDidBecomeActive();
+}
+
+- (void)sceneWillResignActive:(UIScene *)scene
+{
+    SDL_OnApplicationWillResignActive();
+}
+
+- (void)sceneWillEnterForeground:(UIScene *)scene
+{
+    SDL_OnApplicationWillEnterForeground();
+}
+
+- (void)sceneDidEnterBackground:(UIScene *)scene
+{
+    SDL_OnApplicationDidEnterBackground();
+}
+
+- (void)handleURL:(NSURL *)url
+{
+    const char *sourceApplicationCString = NULL;
+    NSURL *fileURL = url.filePathURL;
+    if (fileURL != nil) {
+        SDL_SendDropFile(NULL, fileURL.path.UTF8String);
+    } else {
+        SDL_SendDropFile(NULL, url.absoluteString.UTF8String);
+    }
+    SDL_SendDropComplete(NULL);
+}
+
+- (void)hideLaunchScreen
+{
+    UIWindow *window = launchWindow;
+
+    if (!window || window.hidden) {
+        return;
+    }
+
+    launchWindow = nil;
+
+    [UIView animateWithDuration:0.2
+        animations:^{
+          window.alpha = 0.0;
+        }
+        completion:^(BOOL finished) {
+          window.hidden = YES;
+          UIKit_ForceUpdateHomeIndicator();
+        }];
+}
+
+- (void)postFinishLaunch
+{
+    /* Hide the launch screen the next time the run loop is run. SDL apps will
+     * have a chance to load resources while the launch screen is still up. */
+    [self performSelector:@selector(hideLaunchScreen) withObject:nil afterDelay:0.0];
+
+    /* run the user's application, passing argc and argv */
+    SDL_iPhoneSetEventPump(SDL_TRUE);
+    exit_status = forward_main(forward_argc, forward_argv);
+    SDL_iPhoneSetEventPump(SDL_FALSE);
+
+    if (launchWindow) {
+        launchWindow.hidden = YES;
+        launchWindow = nil;
+    }
+
+    /* exit, passing the return status from the user's application */
+    /* We don't actually exit to support applications that do setup in their
+     * main function and then allow the Cocoa event loop to run. */
+    /* exit(exit_status); */
+}
+
+- (UISceneConfiguration *)application:(UIApplication *)application configurationForConnectingSceneSession:(UISceneSession *)connectingSceneSession options:(UISceneConnectionOptions *)options API_AVAILABLE(ios(13.0))
+{
+    // This doesn't appear to be called, but it needs to be implemented to signal that we support the UIScene life cycle
+    UISceneConfiguration *config = [[UISceneConfiguration alloc] initWithName:@"SDLSceneConfiguration" sessionRole:connectingSceneSession.role];
+    config.delegateClass = [SDLUIKitSceneDelegate class];
+    return config;
+}
+
+@end // SDLUIKitSceneDelegate
+
 @implementation SDLUIKitDelegate {
     UIWindow *launchWindow;
 }
@@ -525,8 +712,8 @@ static UIImage *SDL_LoadLaunchImageNamed(NSString *name, int screenh)
 
 #endif
 
+
 @end
 
 #endif /* SDL_VIDEO_DRIVER_UIKIT */
-
 /* vi: set ts=4 sw=4 expandtab: */
